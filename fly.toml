@@ -1,0 +1,24 @@
+# Деплой на Fly.io: SQLite лежит на persistent volume /data
+app = "amayasoft-paywall"
+primary_region = "ams"
+
+[build]
+
+[env]
+  DATABASE_PATH = "/data/paywall.db"
+
+[[mounts]]
+  source = "paywall_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
