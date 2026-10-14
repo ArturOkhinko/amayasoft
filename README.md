@@ -1,87 +1,135 @@
 # Paywall — Nuxt 4 + TypeScript + SQLite
 
-Мобильный экран покупки подписки по макету
-[Figma «Paywall — mobile»](https://www.figma.com/design/pfNVucVOFjpRHAquVMjS2N).
-Frontend и backend живут в одном Nuxt-проекте, покупка тестовая (без платёжного SDK и реальных денег).
+Тестовое задание: мобильный экран покупки подписки. Макет в Figma, вёрстка на Nuxt 4, server routes, запись тестовой покупки в SQLite, деплой на VPS.
 
-## Запуск
+| | |
+| --- | --- |
+| **Демо** | https://paywall.okhinko-test-task.ru (пока DNS не обновился — http://191.44.47.199) |
+| **Макет** | [Figma «Paywall — mobile»](https://www.figma.com/design/pfNVucVOFjpRHAquVMjS2N) |
+| **Репозиторий** | https://github.com/ArturOkhinko/amayasoft |
+
+«Покупка» — тестовая операция: никакого платёжного SDK, реальных денег и секретных ключей.
+
+## Что проверить
+
+| Сценарий | Как |
+| --- | --- |
+| Выбор тарифа | карточки «Год» / «Месяц», выбранная выделена обводкой, заливкой и галочкой; текст CTA меняется вместе с ценой |
+| Успешная покупка | «Продолжить» → спиннер ~1,2 с → экран «Premium активирован» с номером покупки и датой |
+| Ошибка оплаты | открыть `/?fail=1` и нажать CTA → плашка ошибки и кнопка «Повторить оплату», запись в БД не создаётся |
+| Восстановить покупки | после покупки обновить страницу → «Восстановить покупки» → показывается последняя покупка этого устройства |
+| Ошибка загрузки тарифов | если `GET /api/offers` не ответил — плашка «Не удалось загрузить тарифы» и кнопка «Повторить» |
+
+## Макет
+
+В Figma четыре экрана 390×844: выбор тарифа, загрузка, ошибка, успех. Карточка тарифа и кнопка — компоненты с вариантами (`Default / Selected`, `Default / Loading`).
+
+- Иерархия: заголовок → одна строка ценности → 3 преимущества → тарифы → CTA внизу, в зоне большого пальца.
+- Зоны нажатия: CTA 56 px, крестик 44×44, «Восстановить покупки» 44 px в высоту, карточка тарифа кликабельна целиком (76 px).
+- В состоянии загрузки тарифы, крестик и ссылка приглушены и заблокированы; при ошибке выбранный тариф сохраняется.
+
+## Стек и архитектура
+
+- **Nuxt 4 + TypeScript** — фронтенд и backend (Nitro server routes) в одном проекте.
+- **SQLite** через встроенный в Node модуль `node:sqlite` — без нативных зависимостей и внешних сервисов.
+- **Docker + Caddy** на VPS: Caddy принимает 80/443 и выпускает HTTPS-сертификат, приложение работает в контейнере, файл БД лежит на диске сервера.
+
+```
+Браузер ──HTTPS──▶ Caddy (:443) ──▶ Docker: Nuxt/Nitro (:3000) ──▶ /opt/paywall-data/paywall.db
+```
+
+### API
+
+| Метод | Путь | Ответ |
+| --- | --- | --- |
+| GET | `/api/offers` | `{ offers: Offer[] }` — тарифы из БД |
+| POST | `/api/purchase` | тело `{ offerId, deviceId, simulateFailure? }` → `201 { purchase }`; 400 — невалидный запрос, 404 — нет тарифа, 502 — тестовая ошибка |
+| POST | `/api/restore` | тело `{ deviceId }` → `{ purchase }` (последняя покупка) или 404 |
+
+Типы общие для клиента и сервера: `shared/types/paywall.ts`. `deviceId` — условный идентификатор устройства: UUID, который генерируется в браузере и хранится в `localStorage`.
+
+### База данных
+
+Файл задаётся переменной `DATABASE_PATH` (по умолчанию `./data/paywall.db`). Схема создаётся при первом запросе, тарифы синхронизируются из `server/utils/db.ts`.
+
+```sql
+offers    (id TEXT PK, title, subtitle, price_rub, period, badge, sort, is_default)
+purchases (id INTEGER PK AUTOINCREMENT,
+           offer_id   TEXT → offers.id,
+           device_id  TEXT,
+           amount_rub INTEGER,
+           created_at TEXT  -- ISO 8601, UTC)
+```
+
+## Локальный запуск
+
+Нужен Node.js 22.13+ (рекомендуется 24 LTS).
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000
 ```
 
-Продакшен-сборка:
+Продакшен-сборка без Docker:
 
 ```bash
 npm run build
-DATABASE_PATH=./data/paywall.db npm start
+DATABASE_PATH=./data/paywall.db node .output/server/index.mjs
 ```
 
-Нужен Node.js 22.13+ (рекомендуется 24 LTS): база работает на встроенном модуле `node:sqlite`, нативных зависимостей нет.
+## Деплой
 
-## Сценарии для проверки
+Сервис развёрнут на VPS (Ubuntu 24.04, Sprintbox) в Docker, перед ним стоит Caddy.
 
-| Что | Как |
-| --- | --- |
-| Успешная покупка | выбрать тариф → «Продолжить» → экран «Premium активирован» |
-| Загрузка | после нажатия CTA сервер отвечает ~1,2 с, кнопка показывает спиннер, тарифы и ссылки заблокированы |
-| Ошибка оплаты | открыть `/?fail=1` и нажать CTA → плашка ошибки и кнопка «Повторить оплату» |
-| Восстановить покупки | после покупки обновить страницу → «Восстановить покупки» → показывается последняя покупка этого устройства |
-| Ошибка загрузки тарифов | если `GET /api/offers` упал — плашка «Не удалось загрузить тарифы» с кнопкой «Повторить» |
-
-## API (server routes)
-
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET | `/api/offers` | список тарифов из БД: `{ offers: Offer[] }` |
-| POST | `/api/purchase` | `{ offerId, deviceId, simulateFailure? }` → `201 { purchase }`; 400 — невалидный запрос, 404 — нет тарифа, 502 — тестовая ошибка |
-| POST | `/api/restore` | `{ deviceId }` → `{ purchase }` (последняя покупка) или 404 |
-
-Типы запросов и ответов общие для клиента и сервера: `shared/types/paywall.ts`.
-
-`deviceId` — условный идентификатор устройства: UUID, который создаётся в браузере и хранится в `localStorage`.
-
-## База данных
-
-SQLite через встроенный в Node модуль `node:sqlite`. Файл задаётся переменной `DATABASE_PATH` (по умолчанию `./data/paywall.db`).
-Схема создаётся автоматически при первом запросе, тарифы синхронизируются из `server/utils/db.ts`.
-
-```sql
-offers(id TEXT PK, title, subtitle, price_rub, period, badge, sort, is_default)
-purchases(id INTEGER PK AUTOINCREMENT, offer_id → offers.id, device_id, amount_rub, created_at ISO-8601)
-```
-
-Посмотреть покупки:
+### Первый запуск на чистом сервере
 
 ```bash
-sqlite3 data/paywall.db "SELECT * FROM purchases ORDER BY id DESC LIMIT 10;"
+# Docker, Caddy, sqlite3
+curl -fsSL https://get.docker.com | sh
+apt install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg sqlite3
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update && apt install -y caddy
+
+# Код и данные
+git clone https://github.com/ArturOkhinko/amayasoft.git ~/amayasoft
+mkdir -p /opt/paywall-data
+
+# Приложение
+cd ~/amayasoft && ./deploy/deploy.sh
+
+# Прокси и HTTPS
+cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
 ```
 
-## Деплой (Fly.io, SQLite на persistent volume)
+Для домена нужна A-запись `paywall` → IP сервера. Порты 80 и 443 должны быть открыты.
+
+### Обновление
 
 ```bash
-fly launch --no-deploy --copy-config        # имя приложения в fly.toml можно поменять
-fly volumes create paywall_data --size 1    # том монтируется в /data
-fly deploy
+cd ~/amayasoft && ./deploy/deploy.sh
 ```
 
-В `fly.toml` уже прописаны том `/data` и `DATABASE_PATH=/data/paywall.db`, поэтому покупки переживают
-передеплой и перезапуск машины. Используется одна машина: SQLite не рассчитан на запись из нескольких инстансов.
+Скрипт делает `git pull`, пересобирает образ и перезапускает контейнер. База в `/opt/paywall-data` не затрагивается: покупки переживают обновления и перезагрузку сервера (`--restart unless-stopped`).
 
-Тот же `Dockerfile` подходит для Railway или Render: подключите volume/disk в `/data` и задайте `DATABASE_PATH=/data/paywall.db`.
+> Сборка Nuxt требует ~1–2 ГБ RAM. На слабом сервере быстрее собрать локально (`npm run build`) и залить готовую папку: `rsync -az --delete .output/ root@SERVER:/opt/paywall-app/.output/`, затем запустить её в `node:24-bookworm-slim` с теми же томами.
+
+### Проверка, что покупки пишутся в БД
+
+```bash
+sqlite3 /opt/paywall-data/paywall.db "SELECT * FROM purchases ORDER BY id DESC LIMIT 10;"
+docker logs paywall --tail 50
+```
 
 ## Вёрстка и соответствие макету
 
-- Mobile-first: базовые стили рассчитаны на 360–430 px; на широких экранах колонка ограничена 430 px и центрирована.
-  Ниже 360 px боковые отступы уменьшаются до 16 px.
-- Все размеры, цвета, радиусы и межстрочные интервалы перенесены из Figma 1:1, токены лежат в `app/assets/css/main.css`.
-- Зоны нажатия: CTA 56 px, крестик 44×44, «Восстановить покупки» 44 px в высоту, карточка тарифа целиком (76 px).
-- Обводка карточек сделана через `box-shadow: inset`, как inside-stroke в Figma: при выборе тарифа размеры не меняются.
+- Mobile-first: базовые стили рассчитаны на 360–430 px; на широких экранах колонка ограничена 430 px и центрирована, ниже 360 px отступы уменьшаются до 16 px.
+- Размеры, цвета, радиусы и межстрочные интервалы перенесены из Figma 1:1, токены — в `app/assets/css/main.css`.
+- Обводка карточек — `box-shadow: inset`, как inside-stroke в Figma: при выборе тарифа размеры не меняются.
 - Шрифт Inter (латиница + кириллица) подключён локально из `public/fonts`.
-- Доступность: тарифы — `radiogroup` со стрелками, у ошибок `role="alert"`, после успешной покупки фокус переводится на заголовок.
+- Доступность: тарифы — `radiogroup` со стрелками, ошибки — `role="alert"`, после покупки фокус переходит на заголовок.
 
-Сверка с макетом на 390×844 (Chromium, DPR 1, пиксель совпадает, если Δ ≤ 32 с допуском 1 px на сглаживание шрифта):
+Сверка на 390×844 (Chromium, DPR 1; пиксель совпадает при Δ ≤ 32 с допуском 1 px на сглаживание шрифта):
 
 | Экран | Совпадение |
 | --- | --- |
@@ -90,23 +138,25 @@ fly deploy
 | Ошибка | 99,20 % |
 | Успех | 99,71 % |
 
-Координаты всех текстовых блоков совпадают с Figma с точностью до 1 px. Оставшееся расхождение даёт
-растеризация шрифта (Figma и браузер по-разному сглаживают глифы). Сравнения лежат в `docs/compare`
-(слева Figma, в центре вёрстка, справа красным отличающиеся пиксели), рендеры макета — в `docs/figma`.
+Координаты всех текстовых блоков совпадают с Figma в пределах 1 px; остаток — разница сглаживания шрифта в Figma и браузере. Сравнения — в `docs/compare` (слева Figma, в центре вёрстка, справа красным отличающиеся пиксели), рендеры макета — в `docs/figma`.
 
 ## Структура
 
 ```
 app/
-  app.vue                  состояние экрана: тарифы, покупка, восстановление
-  components/              PaywallView, SuccessView, PlanCard, PrimaryButton, ErrorAlert, AppIcon
+  app.vue                   состояние экрана: тарифы, покупка, восстановление
+  components/               PaywallView, SuccessView, PlanCard, PrimaryButton, ErrorAlert, AppIcon
   composables/useDeviceId.ts
   utils/format.ts
-  assets/css/              токены и стили экрана
+  assets/css/               токены и стили экрана
 server/
   api/offers.get.ts
   api/purchase.post.ts
   api/restore.post.ts
-  utils/db.ts              SQLite: схема, тарифы, покупки
-shared/types/paywall.ts    общие типы клиента и сервера
+  utils/db.ts               SQLite: схема, тарифы, покупки
+shared/types/paywall.ts     общие типы клиента и сервера
+deploy/
+  deploy.sh                 обновление на сервере
+  Caddyfile                 конфиг reverse proxy + HTTPS
+Dockerfile
 ```
