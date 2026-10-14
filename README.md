@@ -61,21 +61,71 @@ purchases (id INTEGER PK AUTOINCREMENT,
            created_at TEXT  -- ISO 8601, UTC)
 ```
 
-## Локальный запуск
+## Как запустить
 
-Нужен Node.js 22.13+ (рекомендуется 24 LTS).
+### Требования
+
+- Node.js **22.13+** (рекомендуется 24 LTS) — проверить: `node -v`
+- npm 10+
+- Для варианта с Docker — Docker Desktop / Docker Engine
+
+### 1. Режим разработки
+
+```bash
+git clone https://github.com/ArturOkhinko/amayasoft.git
+cd amayasoft
+npm install
+npm run dev
+```
+
+Откройте http://localhost:3000. Сервер перезапускается при изменении файлов.
+
+База создаётся автоматически в `./data/paywall.db` при первом запросе — ничего настраивать не нужно. Другой путь к файлу БД можно задать через `.env`:
+
+```bash
+cp .env.example .env    # DATABASE_PATH=./data/paywall.db
+```
+
+В консоли будет предупреждение `ExperimentalWarning: SQLite is an experimental feature` — это нормально для `node:sqlite`.
+
+### 2. Продакшен-сборка без Docker
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+npm run build
+DATABASE_PATH=./data/paywall.db PORT=3000 node .output/server/index.mjs
 ```
 
-Продакшен-сборка без Docker:
+### 3. Через Docker
 
 ```bash
-npm run build
-DATABASE_PATH=./data/paywall.db node .output/server/index.mjs
+docker build -t paywall .
+docker run -d --name paywall -p 3000:3000 -v "$(pwd)/data:/data" paywall
 ```
+
+Приложение — на http://localhost:3000, файл БД — в `./data/paywall.db` на хосте.
+Остановить: `docker rm -f paywall`.
+
+### Проверка, что всё работает
+
+```bash
+curl http://localhost:3000/api/offers
+curl -X POST http://localhost:3000/api/purchase \
+  -H 'Content-Type: application/json' \
+  -d '{"offerId":"premium_year","deviceId":"test-device-0001"}'
+sqlite3 data/paywall.db "SELECT * FROM purchases;"
+```
+
+Первый запрос вернёт два тарифа, второй — созданную покупку (`201`), третий покажет её в БД.
+
+### Полезные команды
+
+| Команда | Что делает |
+| --- | --- |
+| `npm run dev` | dev-сервер с hot reload |
+| `npm run build` | сборка в `.output/` |
+| `npm start` | запуск собранного приложения |
+| `npm run typecheck` | проверка типов |
 
 ## Деплой
 
